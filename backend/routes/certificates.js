@@ -6,17 +6,85 @@
 const express = require("express");
 const QRCode = require("qrcode");
 const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 const router = express.Router();
+
+const ADMIN_USERNAME = "anirudhchourey";
+const ADMIN_PASSWORD = "Anirudhc@8c";
+const adminSessions = new Set();
 
 // ─── Shared blockchain instance (injected from server.js) ───────────────────
 let blockchain;
 const setBlockchain = (bc) => { blockchain = bc; };
 
+function getAuthToken(req) {
+  const headerToken = req.headers["x-admin-token"];
+  if (typeof headerToken === "string" && headerToken.trim()) {
+    return headerToken.trim();
+  }
+
+  const authHeader = req.headers.authorization || "";
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+
+  return "";
+}
+
+function requireAdmin(req, res, next) {
+  const token = getAuthToken(req);
+  if (!token || !adminSessions.has(token)) {
+    return res.status(401).json({
+      success: false,
+      error: "You need to login as admin to access this feature.",
+    });
+  }
+
+  next();
+}
+
+router.post("/auth/login", (req, res) => {
+  const { username, password } = req.body || {};
+
+  if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid admin credentials.",
+    });
+  }
+
+  const token = crypto.randomBytes(24).toString("hex");
+  adminSessions.add(token);
+
+  res.json({
+    success: true,
+    token,
+    username: ADMIN_USERNAME,
+  });
+});
+
+router.get("/auth/status", (req, res) => {
+  const token = getAuthToken(req);
+  res.json({
+    success: true,
+    isAdmin: Boolean(token && adminSessions.has(token)),
+  });
+});
+
+router.post("/auth/logout", (req, res) => {
+  const token = getAuthToken(req);
+  if (token) {
+    adminSessions.delete(token);
+  }
+
+  res.json({ success: true });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  POST /api/issue
 //  Issue a new certificate and mint a blockchain block.
 // ─────────────────────────────────────────────────────────────────────────────
-router.post("/issue", async (req, res) => {
+router.post("/issue", requireAdmin, async (req, res) => {
   try {
     const { studentName, course, issuer, date, grade } = req.body;
 
@@ -142,7 +210,7 @@ router.get("/verify/:hash", (req, res) => {
 //  GET /api/chain
 //  Return the full blockchain (admin use).
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/chain", (req, res) => {
+router.get("/chain", requireAdmin, (req, res) => {
   const stats = blockchain.getChainStats();
   res.json({
     success: true,
@@ -155,7 +223,7 @@ router.get("/chain", (req, res) => {
 //  GET /api/chain/validate
 //  Validate the integrity of the entire blockchain.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/chain/validate", (req, res) => {
+router.get("/chain/validate", requireAdmin, (req, res) => {
   const result = blockchain.validateChain();
   const stats = blockchain.getChainStats();
   res.json({

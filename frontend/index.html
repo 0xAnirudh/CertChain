@@ -79,6 +79,11 @@
       border-bottom: 1px solid var(--border);
       margin-bottom: 48px;
     }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
     .logo {
       display: flex; align-items: center; gap: 12px;
     }
@@ -163,6 +168,41 @@
       transition: var(--transition);
     }
     .card:hover { border-color: var(--border2); }
+
+    .auth-card {
+      margin-bottom: 20px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .auth-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .auth-meta .auth-title {
+      font-family: var(--mono);
+      color: var(--cyan);
+      font-size: .74rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .auth-meta .auth-state {
+      color: var(--text2);
+      font-size: .86rem;
+    }
+    .auth-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .auth-controls input {
+      min-width: 180px;
+    }
 
     /* ─── Form ───────────────────────────────────────────────────────── */
     .form-grid {
@@ -438,25 +478,46 @@
         <div class="logo-sub">Blockchain Certificate Authority</div>
       </div>
     </div>
-    <div id="chain-status" onclick="checkChainStatus()" title="Click to validate chain">
-      <span class="status-dot" id="status-dot"></span>
-      <span id="status-text" style="font-family:var(--mono);font-size:.72rem;">CHAIN VALID</span>
-      <span style="color:var(--text3)">·</span>
-      <span id="status-blocks" style="color:var(--text2);font-family:var(--mono);font-size:.72rem;">0 blocks</span>
+    <div class="header-right">
+      <button class="btn btn-secondary" id="auth-toggle-btn" style="font-size:.7rem;padding:8px 14px;" onclick="toggleAuthCard()">Admin Login</button>
+      <div id="chain-status" onclick="checkChainStatus()" title="Click to validate chain">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text" style="font-family:var(--mono);font-size:.72rem;">CHAIN VALID</span>
+        <span style="color:var(--text3)">·</span>
+        <span id="status-blocks" style="color:var(--text2);font-family:var(--mono);font-size:.72rem;">0 blocks</span>
+      </div>
     </div>
   </header>
 
   <!-- ─── Nav ─────────────────────────────────────────────────────── -->
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('issue')">⬡ Issue</button>
-    <button class="tab" onclick="switchTab('verify')">◎ Verify</button>
+    <button class="tab" onclick="switchTab('issue')">⬡ Issue</button>
+    <button class="tab active" onclick="switchTab('verify')">◎ Verify</button>
     <button class="tab" onclick="switchTab('explorer')">⛓ Explorer</button>
+  </div>
+
+  <div class="card auth-card" id="auth-card" style="display:none;">
+    <div class="auth-meta">
+      <div class="auth-title">Admin Access</div>
+      <div class="auth-state" id="auth-state-text">Not logged in. Verify is public; Issue and Explorer require admin login.</div>
+    </div>
+    <div class="auth-controls" id="auth-login-controls">
+      <input type="text" id="admin-username" placeholder="Admin username" />
+      <input type="password" id="admin-password" placeholder="Admin password" />
+      <button class="btn btn-primary" id="admin-login-btn" style="padding:10px 18px;font-size:.72rem;" onclick="adminLogin()">
+        <span class="spinner"></span>
+        <span class="btn-label">Sign In</span>
+      </button>
+    </div>
+    <div class="auth-controls" id="auth-logout-controls" style="display:none;">
+      <button class="btn btn-ghost" style="padding:10px 18px;font-size:.72rem;" onclick="adminLogout()">Sign Out</button>
+    </div>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <!--  PANEL 1 — ISSUE CERTIFICATE                                  -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div class="panel active" id="panel-issue">
+  <div class="panel" id="panel-issue">
     <div class="section-title">Issue Certificate</div>
     <p class="section-desc">Fill in the certificate details. Each certificate is hashed with SHA-256 and appended to the blockchain as an immutable block.</p>
 
@@ -558,7 +619,7 @@
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <!--  PANEL 2 — VERIFY CERTIFICATE                                 -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div class="panel" id="panel-verify">
+  <div class="panel active" id="panel-verify">
     <div class="section-title">Verify Certificate</div>
     <p class="section-desc">Enter a SHA-256 block hash or scan a QR code to verify certificate authenticity against the blockchain.</p>
 
@@ -587,7 +648,7 @@
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="panel" id="panel-explorer">
     <div class="section-title">Chain Explorer</div>
-    <p class="section-desc">Inspect every block on the chain. Each block is cryptographically linked to the previous one via its hash.</p>
+    <p class="section-desc">Explorer blocks are admin-only. Login to access explorer blocks.</p>
 
     <div class="stats-row" id="chain-stats-row"></div>
 
@@ -617,6 +678,115 @@
   let lastHash = '';
   let lastVerifyUrl = '';
   let lastQrSrc = '';
+  let adminToken = localStorage.getItem('certchainAdminToken') || '';
+  let isAdmin = false;
+
+  function getAdminHeaders(extra = {}) {
+    const headers = { ...extra };
+    if (adminToken) headers['x-admin-token'] = adminToken;
+    return headers;
+  }
+
+  function toggleAuthCard() {
+    const card = document.getElementById('auth-card');
+    card.style.display = card.style.display === 'none' ? 'flex' : 'none';
+  }
+
+  function renderAuthState() {
+    const stateText = document.getElementById('auth-state-text');
+    const loginControls = document.getElementById('auth-login-controls');
+    const logoutControls = document.getElementById('auth-logout-controls');
+    const toggleBtn = document.getElementById('auth-toggle-btn');
+
+    if (isAdmin) {
+      stateText.textContent = 'Logged in as admin. You can issue certificates and open chain explorer.';
+      loginControls.style.display = 'none';
+      logoutControls.style.display = 'flex';
+      toggleBtn.textContent = 'Admin Logged In';
+    } else {
+      stateText.textContent = 'Not logged in. Verify is public; Issue and Explorer require admin login.';
+      loginControls.style.display = 'flex';
+      logoutControls.style.display = 'none';
+      toggleBtn.textContent = 'Admin Login';
+    }
+  }
+
+  async function refreshAuthStatus() {
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/status`, {
+        headers: getAdminHeaders()
+      });
+      const data = await res.json();
+      isAdmin = Boolean(data.isAdmin);
+      if (!isAdmin) {
+        adminToken = '';
+        localStorage.removeItem('certchainAdminToken');
+      }
+    } catch (e) {
+      isAdmin = false;
+    }
+
+    renderAuthState();
+    checkChainStatus();
+  }
+
+  async function adminLogin() {
+    const username = document.getElementById('admin-username').value.trim();
+    const password = document.getElementById('admin-password').value;
+    if (!username || !password) {
+      toast('Enter admin username and password', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('admin-login-btn');
+    btn.disabled = true;
+    btn.classList.add('loading');
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!data.success || !data.token) {
+        toast(data.error || 'Login failed', 'error');
+        return;
+      }
+
+      adminToken = data.token;
+      localStorage.setItem('certchainAdminToken', adminToken);
+      isAdmin = true;
+      document.getElementById('admin-password').value = '';
+      renderAuthState();
+      checkChainStatus();
+      toast('Admin login successful', 'success');
+    } catch (e) {
+      toast('Could not login. Is server running?', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+    }
+  }
+
+  async function adminLogout() {
+    try {
+      await fetch(`${BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: getAdminHeaders()
+      });
+    } catch (e) {
+      // no-op
+    }
+
+    adminToken = '';
+    isAdmin = false;
+    localStorage.removeItem('certchainAdminToken');
+    renderAuthState();
+    checkChainStatus();
+    switchTab('verify');
+    toast('Logged out from admin account', 'success');
+  }
 
   /* ────────────────────────────────────────────────────────────────────
      Tab switching
@@ -646,12 +816,25 @@
      Chain status header
   ──────────────────────────────────────────────────────────────────── */
   async function checkChainStatus() {
+    if (!isAdmin) {
+      document.getElementById('status-dot').className = 'status-dot invalid';
+      document.getElementById('status-text').textContent = 'ADMIN LOGIN REQUIRED';
+      document.getElementById('status-blocks').textContent = 'locked';
+      return;
+    }
+
     try {
-      const res = await fetch(`${BASE_URL}/api/chain/validate`);
+      const res = await fetch(`${BASE_URL}/api/chain/validate`, {
+        headers: getAdminHeaders()
+      });
       const data = await res.json();
       const dot = document.getElementById('status-dot');
       const txt = document.getElementById('status-text');
       const blk = document.getElementById('status-blocks');
+
+      if (!data.success) {
+        throw new Error(data.error || 'Unauthorized');
+      }
 
       dot.className = 'status-dot' + (data.valid ? '' : ' invalid');
       txt.textContent = data.valid ? 'CHAIN VALID' : 'CHAIN INVALID';
@@ -660,13 +843,19 @@
       document.getElementById('status-text').textContent = 'OFFLINE';
     }
   }
-  checkChainStatus();
+  refreshAuthStatus();
   setInterval(checkChainStatus, 10000);
 
   /* ────────────────────────────────────────────────────────────────────
      Issue Certificate
   ──────────────────────────────────────────────────────────────────── */
   async function issueCertificate() {
+    if (!isAdmin) {
+      toast('You need to login as admin to mint certificate on blockchain.', 'error');
+      document.getElementById('auth-card').style.display = 'flex';
+      return;
+    }
+
     const fields = ['studentName','course','issuer','date'];
     const vals = {};
     let missing = false;
@@ -686,7 +875,7 @@
     try {
       const res = await fetch(`${BASE_URL}/api/issue`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(vals)
       });
       const data = await res.json();
@@ -824,13 +1013,25 @@
      Chain Explorer
   ──────────────────────────────────────────────────────────────────── */
   async function loadChain() {
+    if (!isAdmin) {
+      document.getElementById('chain-list').innerHTML = '<div class="empty"><span class="empty-icon">🔒</span>You need to login as admin to open explorer.</div>';
+      document.getElementById('chain-stats-row').innerHTML = '';
+      return;
+    }
+
     const list = document.getElementById('chain-list');
     const statsRow = document.getElementById('chain-stats-row');
     list.innerHTML = '<div class="empty"><span class="empty-icon">⛓</span>Loading blockchain…</div>';
 
     try {
-      const res = await fetch(`${BASE_URL}/api/chain`);
+      const res = await fetch(`${BASE_URL}/api/chain`, {
+        headers: getAdminHeaders()
+      });
       const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Unauthorized');
+      }
 
       // Stats
       statsRow.innerHTML = `
