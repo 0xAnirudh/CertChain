@@ -6,11 +6,12 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
 const { Blockchain } = require("./blockchain");
 const { router: certRouter, setBlockchain } = require("./routes/certificates");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3001;
 
 // ─── Initialise the blockchain singleton ────────────────────────────────────
 const blockchain = new Blockchain();
@@ -22,7 +23,16 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ─── Serve the frontend static files ────────────────────────────────────────
-app.use(express.static(path.join(__dirname, "../frontend")));
+const frontendDistPath = path.join(__dirname, "../frontend/dist");
+const frontendSourcePath = path.join(__dirname, "../frontend");
+const frontendStaticPath = fs.existsSync(frontendDistPath)
+  ? frontendDistPath
+  : frontendSourcePath;
+const frontendIndexPath = fs.existsSync(path.join(frontendDistPath, "index.html"))
+  ? path.join(frontendDistPath, "index.html")
+  : path.join(frontendSourcePath, "index.html");
+
+app.use(express.static(frontendStaticPath));
 
 // ─── API Routes ──────────────────────────────────────────────────────────────
 app.use("/api", certRouter);
@@ -31,7 +41,7 @@ app.use("/api", certRouter);
 // QR codes point to /verify/:hash — serve the frontend SPA and let
 // JS on the client read the hash from the URL.
 app.get("/verify/:hash", (req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend/index.html"));
+  res.sendFile(frontendIndexPath);
 });
 
 // ─── Health check ────────────────────────────────────────────────────────────
@@ -45,7 +55,7 @@ app.get("/api/health", (req, res) => {
 
 // ─── Catch-all: serve frontend for any unmatched route ───────────────────────
 app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend/index.html"));
+  res.sendFile(frontendIndexPath);
 });
 
 // ─── Start server ─────────────────────────────────────────────────────────────

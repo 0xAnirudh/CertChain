@@ -233,4 +233,39 @@ router.get("/chain/validate", requireAdmin, (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  DELETE /api/chain/:hash
+//  Delete a certificate block and rebuild downstream hashes.
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete("/chain/:hash", requireAdmin, (req, res) => {
+  try {
+    const { hash } = req.params;
+    if (!hash || hash.length !== 64) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid hash format. Expected 64-character SHA-256 hex string.",
+      });
+    }
+
+    const result = blockchain.deleteBlockByHash(hash);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    return res.json({
+      success: true,
+      message: "Block deleted and chain rebuilt successfully.",
+      deletedBlock: {
+        blockHash: result.deletedBlock.hash,
+        blockIndex: result.deletedBlock.index,
+        certificateData: result.deletedBlock.certificateData,
+      },
+      stats: result.stats,
+    });
+  } catch (err) {
+    console.error("Delete block error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error." });
+  }
+});
+
 module.exports = { router, setBlockchain };

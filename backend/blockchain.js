@@ -112,6 +112,60 @@ class Blockchain {
   }
 
   /**
+   * Remove a certificate block by hash and rebuild downstream blocks so
+   * index/previousHash links remain valid.
+   * @param {string} hash
+   * @returns {{ success: boolean, deletedBlock?: Block, stats?: object, error?: string }}
+   */
+  deleteBlockByHash(hash) {
+    if (!hash || typeof hash !== "string") {
+      return { success: false, error: "Block hash is required." };
+    }
+
+    const targetIndex = this.chain.findIndex((block) => block.hash === hash);
+    if (targetIndex === -1) {
+      return { success: false, error: "Block not found." };
+    }
+
+    if (targetIndex === 0) {
+      return { success: false, error: "Genesis block cannot be deleted." };
+    }
+
+    const deletedBlock = this.chain[targetIndex];
+    const remaining = this.chain.filter((_, index) => index !== targetIndex);
+    const rebuiltChain = [remaining[0]];
+
+    for (let i = 1; i < remaining.length; i++) {
+      const source = remaining[i];
+      const previousBlock = rebuiltChain[i - 1];
+      const rebuiltBlock = new Block(
+        i,
+        source.certificateData,
+        previousBlock.hash,
+        source.timestamp
+      );
+      rebuiltBlock.mineBlock(this.difficulty);
+      rebuiltChain.push(rebuiltBlock);
+    }
+
+    const oldChain = this.chain;
+    this.chain = rebuiltChain;
+
+    try {
+      this.saveChainToDisk();
+    } catch (error) {
+      this.chain = oldChain;
+      throw error;
+    }
+
+    return {
+      success: true,
+      deletedBlock,
+      stats: this.getChainStats(),
+    };
+  }
+
+  /**
    * Look up a certificate block by its SHA-256 hash.
    * @param {string} hash - The block hash to search for
    * @returns {Block|null} The matching block, or null
