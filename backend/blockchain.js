@@ -5,19 +5,21 @@
  */
 
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 // ─────────────────────────────────────────────
 //  Block Class
 //  Each block represents one issued certificate.
 // ─────────────────────────────────────────────
 class Block {
-  constructor(index, certificateData, previousHash = "0") {
+  constructor(index, certificateData, previousHash = "0", timestamp, nonce = 0, hash) {
     this.index = index;
-    this.timestamp = new Date().toISOString();
+    this.timestamp = timestamp || new Date().toISOString();
     this.certificateData = certificateData; // { studentName, course, issuer, date, certificateId }
     this.previousHash = previousHash;
-    this.nonce = 0;
-    this.hash = this.calculateHash();
+    this.nonce = nonce;
+    this.hash = hash || this.calculateHash();
   }
 
   /**
@@ -47,6 +49,17 @@ class Block {
       this.hash = this.calculateHash();
     }
   }
+
+  static fromJSON(data) {
+    return new Block(
+      data.index,
+      data.certificateData,
+      data.previousHash,
+      data.timestamp,
+      data.nonce,
+      data.hash
+    );
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -54,9 +67,10 @@ class Block {
 //  Manages the chain of certificate blocks.
 // ─────────────────────────────────────────────
 class Blockchain {
-  constructor() {
-    this.chain = [this.createGenesisBlock()];
+  constructor(storagePath = path.join(__dirname, "data", "blockchain.json")) {
+    this.storagePath = storagePath;
     this.difficulty = 2; // Proof-of-work difficulty
+    this.chain = this.loadChainFromDisk() || [this.createGenesisBlock()];
   }
 
   /** Genesis block — the first block, with no certificate data. */
@@ -86,6 +100,14 @@ class Blockchain {
     );
     newBlock.mineBlock(this.difficulty);
     this.chain.push(newBlock);
+
+    try {
+      this.saveChainToDisk();
+    } catch (error) {
+      this.chain.pop();
+      throw error;
+    }
+
     return newBlock;
   }
 
@@ -165,6 +187,37 @@ class Blockchain {
   /** Return the full chain (for admin inspection). */
   getFullChain() {
     return this.chain;
+  }
+
+  /** Load chain state from disk, if it exists. */
+  loadChainFromDisk() {
+    try {
+      if (!fs.existsSync(this.storagePath)) {
+        return null;
+      }
+
+      const raw = fs.readFileSync(this.storagePath, "utf8");
+      if (!raw.trim()) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return null;
+      }
+
+      return parsed.map((block) => Block.fromJSON(block));
+    } catch (error) {
+      console.warn("Unable to load blockchain data from disk:", error.message);
+      return null;
+    }
+  }
+
+  /** Persist the current chain to disk. */
+  saveChainToDisk() {
+    const directory = path.dirname(this.storagePath);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(this.storagePath, JSON.stringify(this.chain, null, 2), "utf8");
   }
 }
 
