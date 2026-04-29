@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CertChain — Blockchain Certificate Verification</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ─── Design Tokens ───────────────────────────────────────────────── */
+    :root {
+      --bg:        #050810;
+      --bg1:       #090e1a;
+      --bg2:       #0d1526;
+      --surface:   #111827;
+      --surface2:  #1a2539;
+      --border:    #1e2d47;
+      --border2:   #2a3f60;
+
+      --cyan:      #00e5ff;
+      --cyan-dim:  #00b4cc;
+      --cyan-glow: rgba(0,229,255,.18);
+      --green:     #00ff9d;
+      --green-dim: #00cc7a;
+      --red:       #ff4757;
+      --amber:     #ffa502;
+
+      --text:      #e2e8f0;
+      --text2:     #94a3b8;
+      --text3:     #4a6080;
+
+      --mono:      'Space Mono', monospace;
+      --sans:      'DM Sans', sans-serif;
+      --radius:    8px;
+      --radius-lg: 16px;
+      --transition: 200ms cubic-bezier(.4,0,.2,1);
+    }
+
+    /* ─── Reset ───────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── Animated grid background ──────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(0,229,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+    }
+
+    /* Radial glow at top */
+    body::after {
+      content: '';
+      position: fixed; top: -200px; left: 50%; transform: translateX(-50%);
+      width: 800px; height: 500px;
+      background: radial-gradient(ellipse at center, rgba(0,229,255,.07) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ─── Layout ──────────────────────────────────────────────────────── */
+    #app { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 0 24px 80px; }
+
+    /* ─── Header ──────────────────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 28px 0 32px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 48px;
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .logo-icon {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, var(--cyan), var(--green));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+    }
+    .logo-text { font-family: var(--mono); font-size: 1.25rem; font-weight: 700; }
+    .logo-text span { color: var(--cyan); }
+    .logo-sub { font-size: .7rem; color: var(--text3); font-family: var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+
+    /* Chain status badge */
+    #chain-status {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 999px; padding: 6px 14px;
+      font-family: var(--mono); font-size: .72rem;
+      cursor: pointer; transition: var(--transition);
+    }
+    #chain-status:hover { border-color: var(--cyan); }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 2s infinite;
+    }
+    .status-dot.invalid { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: .4; }
+    }
+
+    /* ─── Nav tabs ────────────────────────────────────────────────────── */
+    .tabs {
+      display: flex; gap: 4px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 4px;
+      margin-bottom: 40px; width: fit-content;
+    }
+    .tab {
+      padding: 9px 24px; border-radius: 10px;
+      font-family: var(--mono); font-size: .78rem; font-weight: 700;
+      letter-spacing: .04em; text-transform: uppercase;
+      cursor: pointer; transition: var(--transition);
+      color: var(--text3); border: none; background: transparent;
+    }
+    .tab.active {
+      background: var(--surface2);
+      color: var(--cyan);
+      border: 1px solid var(--border2);
+      box-shadow: 0 0 20px var(--cyan-glow);
+    }
+    .tab:hover:not(.active) { color: var(--text); }
+
+    /* ─── Panels ──────────────────────────────────────────────────────── */
+    .panel { display: none; animation: fadeUp .35s ease; }
+    .panel.active { display: block; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─── Section headers ─────────────────────────────────────────────── */
+    .section-title {
+      font-family: var(--mono); font-size: 1.05rem; font-weight: 700;
+      color: var(--cyan); margin-bottom: 6px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .section-title::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+    .section-desc { color: var(--text2); font-size: .88rem; margin-bottom: 28px; }
+
+    /* ─── Cards ──────────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 32px;
+      transition: var(--transition);
+    }
+    .card:hover { border-color: var(--border2); }
+
+    .auth-card {
+      margin-bottom: 20px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .auth-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .auth-meta .auth-title {
+      font-family: var(--mono);
+      color: var(--cyan);
+      font-size: .74rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .auth-meta .auth-state {
+      color: var(--text2);
+      font-size: .86rem;
+    }
+    .auth-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .auth-controls input {
+      min-width: 180px;
+    }
+
+    /* ─── Form ───────────────────────────────────────────────────────── */
+    .form-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+
+    .form-group { display: flex; flex-direction: column; gap: 8px; }
+    .form-group.full { grid-column: 1 / -1; }
+
+    label {
+      font-family: var(--mono); font-size: .72rem; font-weight: 700;
+      color: var(--text3); text-transform: uppercase; letter-spacing: .08em;
+    }
+    input, select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 11px 14px;
+      color: var(--text);
+      font-family: var(--sans); font-size: .9rem;
+      transition: var(--transition);
+      outline: none;
+    }
+    input:focus, select:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 3px var(--cyan-glow);
+    }
+    input::placeholder { color: var(--text3); }
+    select option { background: var(--surface2); }
+
+    /* ─── Buttons ────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 12px 28px;
+      font-family: var(--mono); font-size: .8rem; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase;
+      border: none; border-radius: var(--radius); cursor: pointer;
+      transition: var(--transition); outline: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--cyan), var(--cyan-dim));
+      color: var(--bg);
+      box-shadow: 0 4px 20px var(--cyan-glow);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(0,229,255,.3); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    .btn-secondary {
+      background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border2);
+    }
+    .btn-secondary:hover { border-color: var(--cyan); color: var(--cyan); }
+
+    .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--border2); }
+
+    /* Spinner */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(0,0,0,.3);
+      border-top-color: var(--bg);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: none;
+    }
+    .btn.loading .spinner { display: block; }
+    .btn.loading .btn-label { opacity: .5; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Result card ────────────────────────────────────────────────── */
+    #issue-result { display: none; margin-top: 28px; }
+    .result-grid {
+      display: grid; grid-template-columns: 1fr auto; gap: 28px; align-items: start;
+    }
+    @media (max-width: 640px) { .result-grid { grid-template-columns: 1fr; } }
+
+    .cert-badge {
+      background: linear-gradient(135deg, var(--bg2), var(--surface));
+      border: 1px solid var(--border2);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      position: relative; overflow: hidden;
+    }
+    .cert-badge::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, var(--cyan), var(--green));
+    }
+
+    .cert-title { font-family: var(--mono); font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+    .cert-sub { font-size: .8rem; color: var(--text2); margin-bottom: 20px; }
+
+    .cert-fields { display: flex; flex-direction: column; gap: 12px; }
+    .cert-field { display: flex; gap: 12px; align-items: baseline; }
+    .cert-label {
+      font-family: var(--mono); font-size: .65rem; text-transform: uppercase;
+      letter-spacing: .1em; color: var(--text3); min-width: 80px;
+    }
+    .cert-value { font-size: .88rem; color: var(--text); }
+    .cert-hash {
+      font-family: var(--mono); font-size: .68rem; color: var(--cyan);
+      word-break: break-all; line-height: 1.5;
+    }
+
+    .qr-container {
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+    }
+    .qr-container img {
+      border: 3px solid var(--border2);
+      border-radius: var(--radius);
+      width: 160px; height: 160px;
+    }
+    .qr-label { font-family: var(--mono); font-size: .65rem; color: var(--text3); text-align: center; text-transform: uppercase; }
+
+    /* ─── Verify panel ───────────────────────────────────────────────── */
+    .verify-input-row {
+      display: flex; gap: 12px; align-items: flex-end; margin-bottom: 28px;
+    }
+    .verify-input-row .form-group { flex: 1; }
+
+    #verify-result { display: none; }
+
+    .status-banner {
+      display: flex; align-items: center; gap: 16px;
+      padding: 20px 24px; border-radius: var(--radius-lg);
+      margin-bottom: 24px;
+    }
+    .status-banner.valid {
+      background: rgba(0,255,157,.06);
+      border: 1px solid rgba(0,255,157,.25);
+    }
+    .status-banner.invalid {
+      background: rgba(255,71,87,.06);
+      border: 1px solid rgba(255,71,87,.25);
+    }
+    .status-icon { font-size: 2rem; }
+    .status-text h3 { font-family: var(--mono); font-size: 1rem; margin-bottom: 4px; }
+    .status-text.valid h3 { color: var(--green); }
+    .status-text.invalid h3 { color: var(--red); }
+    .status-text p { font-size: .82rem; color: var(--text2); }
+
+    .cert-detail-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .detail-item {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px;
+    }
+    .detail-item .d-label {
+      font-family: var(--mono); font-size: .65rem; text-transform: uppercase;
+      letter-spacing: .1em; color: var(--text3); margin-bottom: 6px;
+    }
+    .detail-item .d-value { font-size: .9rem; color: var(--text); font-weight: 500; }
+    .detail-item.full { grid-column: 1 / -1; }
+
+    /* ─── Chain Explorer ─────────────────────────────────────────────── */
+    .chain-container {
+      display: flex; flex-direction: column; gap: 0;
+    }
+    .chain-block {
+      background: var(--bg1); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 20px 24px;
+      position: relative; margin-bottom: 0;
+      animation: fadeUp .4s ease;
+      transition: var(--transition);
+    }
+    .chain-block:hover { border-color: var(--border2); }
+    .chain-block.genesis { border-color: rgba(0,229,255,.2); }
+
+    /* Connector line between blocks */
+    .chain-connector {
+      display: flex; flex-direction: column; align-items: center; padding: 6px 0;
+    }
+    .chain-connector-line {
+      width: 2px; height: 28px;
+      background: linear-gradient(to bottom, var(--border2), var(--border));
+    }
+    .chain-connector-arrow {
+      width: 0; height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 8px solid var(--border2);
+    }
+
+    .block-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .block-index {
+      font-family: var(--mono); font-size: .75rem;
+      background: var(--surface2); border: 1px solid var(--border2);
+      border-radius: 999px; padding: 3px 10px;
+      color: var(--cyan);
+    }
+    .block-index.genesis-badge { color: var(--amber); border-color: var(--amber); }
+    .block-time { font-family: var(--mono); font-size: .65rem; color: var(--text3); }
+
+    .block-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 640px) { .block-fields { grid-template-columns: 1fr; } }
+    .block-field { font-size: .8rem; }
+    .block-field .f-label { font-family: var(--mono); font-size: .62rem; color: var(--text3); text-transform: uppercase; margin-bottom: 2px; }
+    .block-field .f-val { color: var(--text); }
+    .block-field .f-hash { font-family: var(--mono); font-size: .62rem; color: var(--cyan); word-break: break-all; }
+    .block-field .f-hash.prev { color: var(--text3); }
+    .block-field.hash-full { grid-column: 1 / -1; }
+
+    /* ─── Alert / Toast ──────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface2); border: 1px solid var(--border2);
+      border-radius: var(--radius-lg); padding: 14px 20px;
+      font-size: .85rem; max-width: 340px;
+      transform: translateY(100px); opacity: 0;
+      transition: all .35s cubic-bezier(.34,1.56,.64,1);
+      z-index: 999;
+      display: flex; align-items: center; gap: 10px;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.error { border-color: var(--red); }
+    #toast.success { border-color: var(--green); }
+
+    /* ─── Misc ────────────────────────────────────────────────────────── */
+    .stats-row {
+      display: flex; gap: 20px; margin-bottom: 32px; flex-wrap: wrap;
+    }
+    .stat-chip {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 18px;
+      font-family: var(--mono);
+    }
+    .stat-chip .s-num { font-size: 1.4rem; font-weight: 700; color: var(--cyan); }
+    .stat-chip .s-label { font-size: .65rem; color: var(--text3); text-transform: uppercase; }
+
+    .copy-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--text3); padding: 2px 6px; border-radius: 4px;
+      font-size: .75rem; font-family: var(--mono);
+      transition: var(--transition);
+    }
+    .copy-btn:hover { color: var(--cyan); }
+
+    /* empty state */
+    .empty {
+      text-align: center; padding: 60px 20px;
+      color: var(--text3); font-family: var(--mono); font-size: .85rem;
+    }
+    .empty .empty-icon { font-size: 2.5rem; margin-bottom: 12px; display: block; }
+
+    hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ─── Header ──────────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🔗</div>
+      <div>
+        <div class="logo-text">Cert<span>Chain</span></div>
+        <div class="logo-sub">Blockchain Certificate Authority</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-secondary" id="auth-toggle-btn" style="font-size:.7rem;padding:8px 14px;" onclick="toggleAuthCard()">Admin Login</button>
+      <div id="chain-status" onclick="checkChainStatus()" title="Click to validate chain">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text" style="font-family:var(--mono);font-size:.72rem;">CHAIN VALID</span>
+        <span style="color:var(--text3)">·</span>
+        <span id="status-blocks" style="color:var(--text2);font-family:var(--mono);font-size:.72rem;">0 blocks</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── Nav ─────────────────────────────────────────────────────── -->
+  <div class="tabs">
+    <button class="tab" onclick="switchTab('issue')">⬡ Issue</button>
+    <button class="tab active" onclick="switchTab('verify')">◎ Verify</button>
+    <button class="tab" onclick="switchTab('explorer')">⛓ Explorer</button>
+  </div>
+
+  <div class="card auth-card" id="auth-card" style="display:none;">
+    <div class="auth-meta">
+      <div class="auth-title">Admin Access</div>
+      <div class="auth-state" id="auth-state-text">Not logged in. Verify is public; Issue and Explorer require admin login.</div>
+    </div>
+    <div class="auth-controls" id="auth-login-controls">
+      <input type="text" id="admin-username" placeholder="Admin username" />
+      <input type="password" id="admin-password" placeholder="Admin password" />
+      <button class="btn btn-primary" id="admin-login-btn" style="padding:10px 18px;font-size:.72rem;" onclick="adminLogin()">
+        <span class="spinner"></span>
+        <span class="btn-label">Sign In</span>
+      </button>
+    </div>
+    <div class="auth-controls" id="auth-logout-controls" style="display:none;">
+      <button class="btn btn-ghost" style="padding:10px 18px;font-size:.72rem;" onclick="adminLogout()">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!--  PANEL 1 — ISSUE CERTIFICATE                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="panel" id="panel-issue">
+    <div class="section-title">Issue Certificate</div>
+    <p class="section-desc">Fill in the certificate details. Each certificate is hashed with SHA-256 and appended to the blockchain as an immutable block.</p>
+
+    <div class="card">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Student Name *</label>
+          <input type="text" id="studentName" placeholder="e.g. Anirudh Chourey" />
+        </div>
+        <div class="form-group">
+          <label>Course / Programme *</label>
+          <input type="text" id="course" placeholder="e.g. Information Technology" />
+        </div>
+        <div class="form-group">
+          <label>Issuing Organization *</label>
+          <input type="text" id="issuer" placeholder="e.g. UIETH, PUSSGRC" />
+        </div>
+        <div class="form-group">
+          <label>Completion Date *</label>
+          <input type="date" id="date" />
+        </div>
+        <div class="form-group">
+          <label>Grade / Result</label>
+          <select id="grade">
+            <option value="Pass">Pass</option>
+            <option value="Distinction">Distinction</option>
+            <option value="Merit">Merit</option>
+            <option value="First Class">First Class</option>
+            <option value="Second Class">Second Class</option>
+            <option value="A+">A+</option>
+            <option value="A">A</option>
+            <option value="B+">B+</option>
+            <option value="B">B</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="issue-btn" onclick="issueCertificate()">
+        <span class="spinner"></span>
+        <span class="btn-label">⬡ &nbsp;Mint Certificate on Blockchain</span>
+      </button>
+    </div>
+
+    <!-- Issue Result -->
+    <div id="issue-result">
+      <div class="card" style="border-color:var(--border2);">
+        <div class="section-title" style="margin-bottom:20px;">Certificate Minted ✓</div>
+        <div class="result-grid">
+          <div class="cert-badge" id="cert-badge">
+            <div class="cert-title" id="res-title">—</div>
+            <div class="cert-sub" id="res-sub">—</div>
+            <div class="cert-fields">
+              <div class="cert-field">
+                <span class="cert-label">Student</span>
+                <span class="cert-value" id="res-student">—</span>
+              </div>
+              <div class="cert-field">
+                <span class="cert-label">Course</span>
+                <span class="cert-value" id="res-course">—</span>
+              </div>
+              <div class="cert-field">
+                <span class="cert-label">Issuer</span>
+                <span class="cert-value" id="res-issuer">—</span>
+              </div>
+              <div class="cert-field">
+                <span class="cert-label">Date</span>
+                <span class="cert-value" id="res-date">—</span>
+              </div>
+              <div class="cert-field">
+                <span class="cert-label">Grade</span>
+                <span class="cert-value" id="res-grade">—</span>
+              </div>
+              <div class="cert-field">
+                <span class="cert-label">Block</span>
+                <span class="cert-value" id="res-block">—</span>
+              </div>
+              <div class="cert-field" style="flex-direction:column;gap:4px;">
+                <span class="cert-label">SHA-256 Hash &nbsp;<button class="copy-btn" onclick="copyHash()">copy</button></span>
+                <span class="cert-hash" id="res-hash">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="qr-container">
+            <img id="qr-img" src="" alt="QR Code" />
+            <div class="qr-label">Scan to verify</div>
+            <button class="btn btn-ghost" style="font-size:.7rem;padding:8px 14px;" onclick="copyVerifyUrl()">
+              Copy verify URL
+            </button>
+            <button class="btn btn-secondary" style="font-size:.7rem;padding:8px 14px;" onclick="downloadQR()">
+              ↓ Save QR
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!--  PANEL 2 — VERIFY CERTIFICATE                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="panel active" id="panel-verify">
+    <div class="section-title">Verify Certificate</div>
+    <p class="section-desc">Enter a SHA-256 block hash or scan a QR code to verify certificate authenticity against the blockchain.</p>
+
+    <div class="card">
+      <div class="verify-input-row">
+        <div class="form-group">
+          <label>Certificate Hash (SHA-256)</label>
+          <input type="text" id="verifyHash"
+            placeholder="64-character hex hash…"
+            onkeydown="if(event.key==='Enter') verifyCertificate()" />
+        </div>
+        <button class="btn btn-primary" id="verify-btn" onclick="verifyCertificate()">
+          <span class="spinner"></span>
+          <span class="btn-label">◎ &nbsp;Verify</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="verify-result" style="margin-top:28px;">
+      <!-- Populated dynamically -->
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!--  PANEL 3 — CHAIN EXPLORER                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="panel" id="panel-explorer">
+    <div class="section-title">Chain Explorer</div>
+    <p class="section-desc">Explorer blocks are admin-only. Login to access explorer blocks.</p>
+
+    <div class="stats-row" id="chain-stats-row"></div>
+
+    <div id="chain-list">
+      <div class="empty">
+        <span class="empty-icon">⛓</span>
+        Loading blockchain…
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast notification -->
+<div id="toast"></div>
+
+<!-- ─── Scripts ─────────────────────────────────────────────────────────── -->
+<script>
+  /* ────────────────────────────────────────────────────────────────────
+     Config — update BASE_URL when deploying
+  ──────────────────────────────────────────────────────────────────── */
+  const BASE_URL = window.location.origin;
+
+  /* ────────────────────────────────────────────────────────────────────
+     State
+  ──────────────────────────────────────────────────────────────────── */
+  let lastHash = '';
+  let lastVerifyUrl = '';
+  let lastQrSrc = '';
+  let adminToken = localStorage.getItem('certchainAdminToken') || '';
+  let isAdmin = false;
+
+  function getAdminHeaders(extra = {}) {
+    const headers = { ...extra };
+    if (adminToken) headers['x-admin-token'] = adminToken;
+    return headers;
+  }
+
+  function toggleAuthCard() {
+    const card = document.getElementById('auth-card');
+    card.style.display = card.style.display === 'none' ? 'flex' : 'none';
+  }
+
+  function renderAuthState() {
+    const stateText = document.getElementById('auth-state-text');
+    const loginControls = document.getElementById('auth-login-controls');
+    const logoutControls = document.getElementById('auth-logout-controls');
+    const toggleBtn = document.getElementById('auth-toggle-btn');
+
+    if (isAdmin) {
+      stateText.textContent = 'Logged in as admin. You can issue certificates and open chain explorer.';
+      loginControls.style.display = 'none';
+      logoutControls.style.display = 'flex';
+      toggleBtn.textContent = 'Admin Logged In';
+    } else {
+      stateText.textContent = 'Not logged in. Verify is public; Issue and Explorer require admin login.';
+      loginControls.style.display = 'flex';
+      logoutControls.style.display = 'none';
+      toggleBtn.textContent = 'Admin Login';
+    }
+  }
+
+  async function refreshAuthStatus() {
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/status`, {
+        headers: getAdminHeaders()
+      });
+      const data = await res.json();
+      isAdmin = Boolean(data.isAdmin);
+      if (!isAdmin) {
+        adminToken = '';
+        localStorage.removeItem('certchainAdminToken');
+      }
+    } catch (e) {
+      isAdmin = false;
+    }
+
+    renderAuthState();
+    checkChainStatus();
+  }
+
+  async function adminLogin() {
+    const username = document.getElementById('admin-username').value.trim();
+    const password = document.getElementById('admin-password').value;
+    if (!username || !password) {
+      toast('Enter admin username and password', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('admin-login-btn');
+    btn.disabled = true;
+    btn.classList.add('loading');
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!data.success || !data.token) {
+        toast(data.error || 'Login failed', 'error');
+        return;
+      }
+
+      adminToken = data.token;
+      localStorage.setItem('certchainAdminToken', adminToken);
+      isAdmin = true;
+      document.getElementById('admin-password').value = '';
+      renderAuthState();
+      checkChainStatus();
+      toast('Admin login successful', 'success');
+    } catch (e) {
+      toast('Could not login. Is server running?', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+    }
+  }
+
+  async function adminLogout() {
+    try {
+      await fetch(`${BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: getAdminHeaders()
+      });
+    } catch (e) {
+      // no-op
+    }
+
+    adminToken = '';
+    isAdmin = false;
+    localStorage.removeItem('certchainAdminToken');
+    renderAuthState();
+    checkChainStatus();
+    switchTab('verify');
+    toast('Logged out from admin account', 'success');
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     Tab switching
+  ──────────────────────────────────────────────────────────────────── */
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', ['issue','verify','explorer'][i] === name);
+    });
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById(`panel-${name}`).classList.add('active');
+    if (name === 'explorer') loadChain();
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     Toast
+  ──────────────────────────────────────────────────────────────────── */
+  let toastTimer;
+  function toast(msg, type='info') {
+    const el = document.getElementById('toast');
+    el.className = `show ${type}`;
+    el.innerHTML = (type==='success'?'✅':type==='error'?'❌':'ℹ️') + ' ' + msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     Chain status header
+  ──────────────────────────────────────────────────────────────────── */
+  async function checkChainStatus() {
+    if (!isAdmin) {
+      document.getElementById('status-dot').className = 'status-dot invalid';
+      document.getElementById('status-text').textContent = 'ADMIN LOGIN REQUIRED';
+      document.getElementById('status-blocks').textContent = 'locked';
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/chain/validate`, {
+        headers: getAdminHeaders()
+      });
+      const data = await res.json();
+      const dot = document.getElementById('status-dot');
+      const txt = document.getElementById('status-text');
+      const blk = document.getElementById('status-blocks');
+
+      if (!data.success) {
+        throw new Error(data.error || 'Unauthorized');
+      }
+
+      dot.className = 'status-dot' + (data.valid ? '' : ' invalid');
+      txt.textContent = data.valid ? 'CHAIN VALID' : 'CHAIN INVALID';
+      blk.textContent = `${data.stats.totalBlocks} blocks`;
+    } catch(e) {
+      document.getElementById('status-text').textContent = 'OFFLINE';
+    }
+  }
+  refreshAuthStatus();
+  setInterval(checkChainStatus, 10000);
+
+  /* ────────────────────────────────────────────────────────────────────
+     Issue Certificate
+  ──────────────────────────────────────────────────────────────────── */
+  async function issueCertificate() {
+    if (!isAdmin) {
+      toast('You need to login as admin to mint certificate on blockchain.', 'error');
+      document.getElementById('auth-card').style.display = 'flex';
+      return;
+    }
+
+    const fields = ['studentName','course','issuer','date'];
+    const vals = {};
+    let missing = false;
+    for (const f of fields) {
+      const el = document.getElementById(f);
+      vals[f] = el.value.trim();
+      if (!vals[f]) { el.style.borderColor = 'var(--red)'; missing = true; }
+      else el.style.borderColor = '';
+    }
+    if (missing) { toast('Please fill all required fields', 'error'); return; }
+
+    vals.grade = document.getElementById('grade').value;
+
+    const btn = document.getElementById('issue-btn');
+    btn.disabled = true; btn.classList.add('loading');
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/issue`, {
+        method: 'POST',
+        headers: getAdminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(vals)
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        toast(data.error || 'Failed to issue certificate', 'error');
+        return;
+      }
+
+      // Store for copy actions
+      lastHash = data.certificate.blockHash;
+      lastVerifyUrl = data.verifyUrl;
+      lastQrSrc = data.qrCode;
+
+      // Populate result card
+      document.getElementById('res-title').textContent = data.certificate.course;
+      document.getElementById('res-sub').textContent = `Issued by ${data.certificate.issuer}`;
+      document.getElementById('res-student').textContent = data.certificate.studentName;
+      document.getElementById('res-course').textContent = data.certificate.course;
+      document.getElementById('res-issuer').textContent = data.certificate.issuer;
+      document.getElementById('res-date').textContent = new Date(data.certificate.date).toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'});
+      document.getElementById('res-grade').textContent = data.certificate.grade;
+      document.getElementById('res-block').textContent = `#${data.certificate.blockIndex}`;
+      document.getElementById('res-hash').textContent = data.certificate.blockHash;
+      document.getElementById('qr-img').src = data.qrCode;
+
+      document.getElementById('issue-result').style.display = 'block';
+      document.getElementById('issue-result').scrollIntoView({ behavior:'smooth', block:'nearest' });
+
+      toast('Certificate minted on the blockchain! ⛓', 'success');
+      checkChainStatus();
+
+      // Clear form
+      fields.forEach(f => document.getElementById(f).value = '');
+      document.getElementById('grade').selectedIndex = 0;
+
+    } catch(e) {
+      toast('Connection error — is the server running?', 'error');
+    } finally {
+      btn.disabled = false; btn.classList.remove('loading');
+    }
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     Verify Certificate
+  ──────────────────────────────────────────────────────────────────── */
+  async function verifyCertificate(hashOverride) {
+    const hash = hashOverride || document.getElementById('verifyHash').value.trim();
+    if (!hash) { toast('Please enter a certificate hash', 'error'); return; }
+
+    const btn = document.getElementById('verify-btn');
+    btn.disabled = true; btn.classList.add('loading');
+
+    const container = document.getElementById('verify-result');
+    container.style.display = 'block';
+    container.innerHTML = '<div class="empty"><span class="empty-icon">◎</span>Querying blockchain…</div>';
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/verify/${hash}`);
+      const data = await res.json();
+
+      if (data.valid) {
+        const c = data.certificate;
+        container.innerHTML = `
+          <div class="status-banner valid">
+            <div class="status-icon">✅</div>
+            <div class="status-text valid">
+              <h3>CERTIFICATE VERIFIED</h3>
+              <p>This certificate is authentic and recorded on the blockchain. Chain integrity: ${data.chainIntegrity}</p>
+            </div>
+          </div>
+          <div class="cert-detail-grid">
+            <div class="detail-item">
+              <div class="d-label">Student Name</div>
+              <div class="d-value">${c.studentName}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">Course</div>
+              <div class="d-value">${c.course}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">Issuer</div>
+              <div class="d-value">${c.issuer}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">Date</div>
+              <div class="d-value">${new Date(c.date).toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'})}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">Grade</div>
+              <div class="d-value">${c.grade}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">Block Index</div>
+              <div class="d-value">#${c.blockIndex}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">Timestamp</div>
+              <div class="d-value">${new Date(c.timestamp).toLocaleString()}</div>
+            </div>
+            <div class="detail-item full">
+              <div class="d-label">SHA-256 Block Hash</div>
+              <div class="d-value" style="font-family:var(--mono);font-size:.72rem;color:var(--cyan);word-break:break-all;">${c.blockHash}</div>
+            </div>
+            <div class="detail-item full">
+              <div class="d-label">Previous Block Hash</div>
+              <div class="d-value" style="font-family:var(--mono);font-size:.72rem;color:var(--text3);word-break:break-all;">${c.previousHash}</div>
+            </div>
+          </div>
+        `;
+      } else {
+        const msg = data.status === 'NOT_FOUND'
+          ? 'No certificate with this hash exists on the blockchain.'
+          : data.status === 'CHAIN_COMPROMISED'
+          ? 'Blockchain integrity compromised. Results unreliable.'
+          : data.error || 'Certificate is invalid.';
+        container.innerHTML = `
+          <div class="status-banner invalid">
+            <div class="status-icon">❌</div>
+            <div class="status-text invalid">
+              <h3>INVALID CERTIFICATE</h3>
+              <p>${msg}</p>
+            </div>
+          </div>
+        `;
+      }
+    } catch(e) {
+      container.innerHTML = '<div class="empty"><span class="empty-icon">⚠️</span>Connection error — is the server running?</div>';
+    } finally {
+      btn.disabled = false; btn.classList.remove('loading');
+    }
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     Chain Explorer
+  ──────────────────────────────────────────────────────────────────── */
+  async function loadChain() {
+    if (!isAdmin) {
+      document.getElementById('chain-list').innerHTML = '<div class="empty"><span class="empty-icon">🔒</span>You need to login as admin to open explorer.</div>';
+      document.getElementById('chain-stats-row').innerHTML = '';
+      return;
+    }
+
+    const list = document.getElementById('chain-list');
+    const statsRow = document.getElementById('chain-stats-row');
+    list.innerHTML = '<div class="empty"><span class="empty-icon">⛓</span>Loading blockchain…</div>';
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/chain`, {
+        headers: getAdminHeaders()
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Unauthorized');
+      }
+
+      // Stats
+      statsRow.innerHTML = `
+        <div class="stat-chip">
+          <div class="s-num">${data.stats.totalBlocks}</div>
+          <div class="s-label">Total Blocks</div>
+        </div>
+        <div class="stat-chip">
+          <div class="s-num">${data.stats.totalCertificates}</div>
+          <div class="s-label">Certificates</div>
+        </div>
+        <div class="stat-chip">
+          <div class="s-num" style="color:${data.stats.isValid?'var(--green)':'var(--red)'}">${data.stats.isValid?'✓ VALID':'✗ INVALID'}</div>
+          <div class="s-label">Chain Integrity</div>
+        </div>
+      `;
+
+      if (data.chain.length === 0) {
+        list.innerHTML = '<div class="empty"><span class="empty-icon">⛓</span>No blocks yet.</div>';
+        return;
+      }
+
+      // Render chain in reverse (newest first) except genesis stays last
+      const reversed = [...data.chain].reverse();
+      list.innerHTML = '';
+
+      reversed.forEach((block, idx) => {
+        const isGenesis = block.index === 0;
+        const certData = block.certificateData;
+
+        const blockEl = document.createElement('div');
+        blockEl.innerHTML = `
+          <div class="chain-block ${isGenesis?'genesis':''}">
+            <div class="block-header">
+              <span class="block-index ${isGenesis?'genesis-badge':''}">${isGenesis ? 'GENESIS' : `Block #${block.index}`}</span>
+              <span class="block-time">${new Date(block.timestamp).toLocaleString()}</span>
+            </div>
+            <div class="block-fields">
+              ${!isGenesis ? `
+              <div class="block-field">
+                <div class="f-label">Student</div>
+                <div class="f-val">${certData.studentName}</div>
+              </div>
+              <div class="block-field">
+                <div class="f-label">Course</div>
+                <div class="f-val">${certData.course}</div>
+              </div>
+              <div class="block-field">
+                <div class="f-label">Issuer</div>
+                <div class="f-val">${certData.issuer}</div>
+              </div>
+              <div class="block-field">
+                <div class="f-label">Grade</div>
+                <div class="f-val">${certData.grade}</div>
+              </div>
+              ` : `
+              <div class="block-field">
+                <div class="f-label">Type</div>
+                <div class="f-val">Genesis Block — Chain Origin</div>
+              </div>
+              `}
+              <div class="block-field hash-full">
+                <div class="f-label">Current Hash (SHA-256)</div>
+                <div class="f-hash">${block.hash}</div>
+              </div>
+              <div class="block-field hash-full">
+                <div class="f-label">Previous Hash</div>
+                <div class="f-hash prev">${block.previousHash}</div>
+              </div>
+            </div>
+            ${!isGenesis ? `
+            <div style="margin-top:14px;">
+              <button class="btn btn-ghost" style="font-size:.7rem;padding:7px 14px;"
+                onclick="switchTab('verify');document.getElementById('verifyHash').value='${block.hash}';verifyCertificate('${block.hash}')">
+                ◎ Verify this certificate
+              </button>
+            </div>` : ''}
+          </div>
+        `;
+
+        list.appendChild(blockEl);
+
+        // Add connector (except after last item)
+        if (idx < reversed.length - 1) {
+          const conn = document.createElement('div');
+          conn.className = 'chain-connector';
+          conn.innerHTML = `<div class="chain-connector-line"></div><div class="chain-connector-arrow"></div>`;
+          list.appendChild(conn);
+        }
+      });
+
+    } catch(e) {
+      list.innerHTML = '<div class="empty"><span class="empty-icon">⚠️</span>Could not load chain — is the server running?</div>';
+    }
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     Utilities
+  ──────────────────────────────────────────────────────────────────── */
+  function copyHash() {
+    if (!lastHash) return;
+    navigator.clipboard.writeText(lastHash).then(() => toast('Hash copied!', 'success'));
+  }
+  function copyVerifyUrl() {
+    if (!lastVerifyUrl) return;
+    navigator.clipboard.writeText(lastVerifyUrl).then(() => toast('URL copied!', 'success'));
+  }
+  function downloadQR() {
+    if (!lastQrSrc) return;
+    const a = document.createElement('a');
+    a.href = lastQrSrc;
+    a.download = `certchain-${lastHash.slice(0,8)}.png`;
+    a.click();
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     Handle /verify/:hash URL directly (from QR code scan)
+  ──────────────────────────────────────────────────────────────────── */
+  (function handleQRRoute() {
+    const path = window.location.pathname;
+    const match = path.match(/^\/verify\/([a-f0-9]{64})$/i);
+    if (match) {
+      const hash = match[1];
+      switchTab('verify');
+      document.getElementById('verifyHash').value = hash;
+      // Wait for DOM then verify
+      setTimeout(() => verifyCertificate(hash), 300);
+    }
+  })();
+</script>
+</body>
+</html>
